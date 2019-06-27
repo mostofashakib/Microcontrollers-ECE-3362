@@ -1,0 +1,299 @@
+;-------------------------------------------------------------------------------
+;   
+;   This code provides a trivial example for demonstrating multiplexing with
+;   the 4-digit display- mainly this will show the unique number 7856 then run
+;   a quick test of the 4 digits.   Also provides a 
+;   crude test of the three pushbuttons on the expansion board.
+;   Rightmost PB pressed - will turn on display '--56' on the 4-digit display 
+;   Middle PB pressed - will turn on display '78.:5.6' on the 4-digit display
+;   Leftmost PB pressed - will turn on display '78--' on the 4-digit display
+;   Only capable of testing one pushbutton at a time, not combinations
+;    
+;      
+;
+;   Target: TI LaunchPad development board with MSP430G2553 device with the
+;    custom Display Board installed
+;
+;       Date:           October 09, 2018
+;       Last Revision:  1.0 
+;                       1.1 Mar 24, 2013 - minor additions to 2nd pattern
+;                       1.2 July 18, 2013 - added setup code for P2 to enable
+;                        P2.6 and P2.7, added code to test ex bd pushbuttons
+;                       NOTE: found error in bd layout, PB2, PB1 swapped
+;                       1.3 Oct 6, 2015 - revised pushbutton test to make it 
+;                       'stick' in pushbutton test until all 3 buttons have
+;                       been tested before returning to top of display test
+;       Written by:     Mostofa Adib Shakib, Department of ECE, Texas Tech University
+;       Adapted from:   Dr. Michael Helm, ECE dept, Texas Tech University
+;       Assembler/IDE:  IAR Embedded Workbench 6.5
+;
+;       HW I/O assignments:
+;       P1.0    (output) Segment A (active low) drives display board
+;       P1.1    (output) Segment B (active low) drives display board
+;       P1.2    (output) Segment C (active low) drives display board
+;       P1.3    (output) Segment D (active low) drives display board
+;       P1.4    (output) Segment E (active low) drives display board
+;       P1.5    (output) Segment F (active low) drives display board
+;       P1.6    (output) Segment G (active low) drives display board
+;       P1.7    (output) Segment DP (active low) drives display board
+;
+;       P2.0    (output) Digit 3 (active low) MSdigit (leftmost)
+;       P2.1    (output) Digit 2 (active low)  
+;       P2.2    (output) Digit 1 (active low)  
+;       P2.3    (output) Digit 0 (active low) LSdigit (rightmost)
+;       P2.4    (output) Other - (dots - colon)
+;       P2.5    (input)  Pushbutton 0 (active low) (rightmost)
+;       P2.6    (input)  Pushbutton 1 (active low) (middle)
+;       P2.7    (input)  Pushbutton 2 (active low) (leftmost)
+;
+;
+;
+;*******************************************************************************
+#include  "msp430g2553.h"
+;-------------------------------------------------------------------------------
+; Definition of Constants
+;-------------------------------------------------------------------------------
+
+LONG_DELAY      EQU     65535  ; max 16 bit value (FFFFh)
+;LONG_DELAY      EQU     600  ; max 16 bit value (FFFFh)
+SHORT_DELAY     EQU     5000  ; 
+
+TIMER_A_COUNT_1   EQU   1000   ; set count value in TimerA_0  
+
+MAX_TIMER_COUNT  EQU    50    ; number of Timer Interrupts that have to occur
+
+SEG_A         EQU     %00000001 ; Port pin position P1.0
+SEG_B         EQU     %00000010 ; Port pin position P1.1
+SEG_C         EQU     %00000100 ; Port pin position P1.2
+SEG_D         EQU     %00001000 ; Port pin position P1.3
+SEG_E         EQU     %00010000 ; Port pin position P1.4
+SEG_F         EQU     %00100000 ; Port pin position P1.5
+SEG_G         EQU     %01000000 ; Port pin position P1.6
+SEG_DP        EQU     %10000000 ; Port pin position P1.7
+
+;NOTE: display board requires INVERSE of these patterns due to Active LOW
+DIG_3         EQU     %00000001 ; Port pin position P2.0 (MSdigit)
+DIG_2         EQU     %00000010 ; Port pin position P2.1
+DIG_1         EQU     %00000100 ; Port pin position P2.2
+DIG_0         EQU     %00001000 ; Port pin position P2.3(LSdigit)
+DP_COM        EQU     %00010000 ; Port pin position P2.4
+
+
+PB_0         EQU     %00100000 ; Port pin position P2.5
+PB_2         EQU     %01000000 ; Port pin position P2.6  ; swapped due to bd
+PB_1         EQU     %10000000 ; Port pin position P2.7  ; layout error
+
+
+SEG_PORT         EQU     P1OUT
+DIG_PORT         EQU     P2OUT
+PB_PORT          EQU     P2IN
+
+
+;NOTE: display bd requires the INVERSE of these patterns due to Active LOW
+ONE             EQU     %00000110
+TWO             EQU     %01011011
+THREE           EQU     %01001111
+FOUR            EQU     %01100110
+FIVE            EQU     %01101101
+SIX             EQU     %01111100
+SEVEN           EQU     %00000111
+EIGHT           EQU     %01111111
+NINE            EQU     %01100111
+ZERO            EQU     %00111111
+EIGHTPLUS       EQU     %00000000
+FIVEPLUS        EQU     %00010010
+Dots            EQU     %11111100
+
+
+;-------------------------------------------------------------------------------
+; Definition of Variables
+;-------------------------------------------------------------------------------
+
+                ORG   0200h     ; beginning of RAM space (necessary statement)
+
+; no variables used in this simple example
+
+;-------------------------------------------------------------------------------
+            ORG     0C000h                  ; Program Reset (prog memory start)
+                                            ; this is Program memory start 
+                                            ; address for MSP430G2553 (16K)
+;-------------------------------------------------------------------------------
+RESET       mov.w   #0400h,SP        ; Initialize stackpointer(to end of RAM +1)
+                                     ; RAM is 512 bytes, last position is 3FFh
+                                     
+StopWDT     mov.w   #WDTPW+WDTHOLD,&WDTCTL  ; Stop WDT
+
+SetupP1     mov.b   #0FFh, &P1DIR  ; all as outputs          
+            mov.b   #01Fh, &P2DIR ; all but 3 MSbits as outputs 
+          
+SetupP2    bis.b    #DIG_3+DIG_2+DIG_1+DIG_0+DP_COM, &P2DIR ; all outputs but
+                                                            ; the PB positions
+           bic.b    #PB_1+PB_2, &P2SEL   ; Clears the P2SEL bits so that 
+                                        ; P2.6 and P2.7 function as GPIO pins
+          
+                                                                                        
+           ; The PushButtons are wired to P2.5,6,7 (active LOW), so we need to  
+           ; turn on the internal Pullup Resistors  - this is done with P2REN
+           ; register
+           
+Mainloop:      mov.b    #PB_0+PB_1+PB_2, &P2REN    ;turn on the internal resistor
+               mov.b    #PB_0+PB_1+PB_2, &P2OUT    ; set the resistor to Pullup mode
+           
+           ; turn off all the segments and digits
+               mov.b #0FFh, &SEG_PORT
+               mov.b #0FFh, &DIG_PORT
+
+; test the 3 pushbuttons on the expansion board (this simple approach will
+; only work for one button at a time, but that is an OK constraint for this
+;  simple piece of code for checking the board's functionality
+; this function introduces an empty register and compare the values with the push buttons and show the appropiate pattern 
+
+           mov #0, R4
+TestPushButtons
+           cmp #1,R4
+           jz PB_0_Pressed
+           cmp #2,R4
+           jz PB_1_Pressed
+           cmp #3,R4
+           jz PB_2_Pressed
+           
+Default    
+           mov.b #~DIG_3, &DIG_PORT
+           mov.b #~SEVEN, &SEG_PORT           
+           mov.b #0FFh, &SEG_PORT
+           
+           mov.b #~DIG_2, &DIG_PORT
+           mov.b #~EIGHT, &SEG_PORT           
+           mov.b #0FFh, &SEG_PORT
+
+           mov.b #~DIG_1, &DIG_PORT
+           mov.b #~FIVE, &SEG_PORT           
+           mov.b #0FFh, &SEG_PORT
+           
+           mov.b #~DIG_0, &DIG_PORT
+           mov.b #~SIX, &SEG_PORT           
+           mov.b #0FFh, &SEG_PORT
+           jmp Done           
+             
+             ; the 4-digit-display pattern when the 0th button is pressed.
+                                
+PB_0_Pressed 
+
+           mov.b #~DIG_3, &DIG_PORT
+           mov.b #~SEG_G, &SEG_PORT           
+           mov.b #0FFh, &SEG_PORT
+           
+           mov.b #~DIG_2, &DIG_PORT
+           mov.b #~SEG_G, &SEG_PORT           
+           mov.b #0FFh, &SEG_PORT
+
+           mov.b #~DIG_1, &DIG_PORT
+           mov.b #~FIVE, &SEG_PORT           
+           mov.b #0FFh, &SEG_PORT
+           
+           mov.b #~DIG_0, &DIG_PORT
+           mov.b #~SIX, &SEG_PORT           
+           mov.b #0FFh, &SEG_PORT
+           jmp Done
+ 
+            ; the 4-digit-display pattern when the 1st button is pressed. 
+PB_1_Pressed
+
+           mov.b #~DP_COM, &DIG_PORT
+           mov.b #Dots,    &SEG_PORT           
+           mov.b #0FFh,    &SEG_PORT
+
+           mov.b #~DIG_3, &DIG_PORT
+           mov.b #~SEVEN, &SEG_PORT           
+           mov.b #0FFh, &SEG_PORT
+           
+           mov.b #~DIG_2, &DIG_PORT
+           mov.b #EIGHTPLUS, &SEG_PORT           
+           mov.b #0FFh, &SEG_PORT
+
+           mov.b #~DIG_1, &DIG_PORT
+           mov.b #FIVEPLUS, &SEG_PORT           
+           mov.b #0FFh, &SEG_PORT
+           
+           mov.b #~DIG_0, &DIG_PORT
+           mov.b #~SIX, &SEG_PORT           
+           mov.b #0FFh, &SEG_PORT                     
+           jmp Done
+
+ ; the 4-digit-display pattern when the 2nd button is pressed.            
+             
+PB_2_Pressed
+
+           mov.b #~DIG_3, &DIG_PORT
+           mov.b #~SEVEN, &SEG_PORT           
+           mov.b #0FFh, &SEG_PORT
+           
+           mov.b #~DIG_2, &DIG_PORT
+           mov.b #~EIGHT, &SEG_PORT           
+           mov.b #0FFh, &SEG_PORT
+           
+           mov.b #~DIG_1, &DIG_PORT
+           mov.b #~SEG_G, &SEG_PORT           
+           mov.b #0FFh, &SEG_PORT
+           
+           mov.b #~DIG_0, &DIG_PORT
+           mov.b #~SEG_G, &SEG_PORT           
+           mov.b #0FFh, &SEG_PORT
+           
+           jmp Done
+Done:
+          bit.b #PB_0,&PB_PORT
+          jne Test1
+          mov #1,R4
+          
+Test1:        bit.b #PB_1,&PB_PORT
+          jne Test2
+          mov #2,R4
+Test2:        bit.b #PB_2,&PB_PORT
+          jne Test3
+          mov #3,R4     
+Test3:        jmp TestPushButtons     
+
+;-------------------------------------------------------------------------------
+;           End of main code
+;-------------------------------------------------------------------------------                                            
+                                           
+;-------------------------------------------------------------------------------
+;           Subroutines
+;------------------------------------------------------------------------------- 
+
+;-------------------------------------------------------------------------------
+; Delay_Long
+;  passed in - nothing
+;  returned - nothing
+;  accomplishes - long delay
+;  uses: R15
+;-------------------------------------------------------------------------------
+Delay_Long
+    push R15     ; save R15 since we use it here
+DelayTopL
+    mov #LONG_DELAY, R15     ;load loop counter (R15) with Long Delay constant
+Loop1Long
+    dec R15                     ; decrement loop counter
+    jnz Loop1Long               ; Zero yet?, no decrement again
+
+    pop R15     ; restore R15 before returning
+    ret         ; return
+;-------------------------------------------------------------------------------
+;  end of Delay_Long
+;-------------------------------------------------------------------------------
+
+;-------------------------------------------------------------------------------
+;           End of all Subroutines
+;-------------------------------------------------------------------------------
+
+;-------------------------------------------------------------------------------
+;           Interrupt Vectors
+;-------------------------------------------------------------------------------
+
+            ORG     0FFFEh                  ; MSP430 RESET Vector
+            DW      RESET                   ; establishes the label RESET as 
+                                            ; the starting point
+            END                             ; END of all code for this program
+;-------------------------------------------------------------------------------
+;-------------------------------------------------------------------------------

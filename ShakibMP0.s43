@@ -1,0 +1,142 @@
+;-------------------------------------------------------------------------------
+;    Projecgt 1 for ECE 3362 Microcontrollers class at TTU
+;    I was assigned the number 26 by the instructor.
+;    This program will blink RED LED twice and GREEN LED six times on the TI LaunchPad board.
+;    This is accomplished by resitering two variables at the beginning and looping it until 
+;    the condition is met. We are also using a delay counter to set delays and the way it is done is we
+;    set the varible to the maximum value in hexadecimal and decrementing one from it.
+;
+;    Purpose:  This program is an example of about the simplist Assembly Language 
+;    program possible that actually does something observable to the outside 
+;    world (in this case blinking the LED connected to PORT 1.0 - PORT 1 pin 0)
+;    There is a simpler solution, involving XOR operation, but this one is 
+;    probably a better example to learn from
+;
+;    Target: TI LaunchPad development board with MSP430G2553 device installed
+;
+;       Date:           September 18, 2018
+;       Written by:     Mostofa Adib Shakib, ECE dept, Texas Tech University
+;       Last Revision:  1.0
+;                       1.1  Jan 27, 2017 changed hexadecimal formatting from
+;                        0000h style to 0x0000 style
+;                       1.2 Sept 5, 2018 - revised to use bis.b and bic.b 
+;                        instructions rather than xor.b, updated IDE rev to 6.5
+;       Company:        Texas Tech University
+;       Adapted from:   Example code from Dr. M.Helm, ; I modified the entire Mainloop and delay counter.
+;       Assembler/IDE:  IAR Embedded Workbench kickstart v6.5
+;
+;       HW I/O assignments: (hardwired on LaunchPad board)
+;       P1.0    LED1    (Active HIGH)RED
+;       P1.1    not used
+;       P1.2    not used
+;       P1.3    PushButton (Active LOW) (internal Pullup Enabled)
+;       P1.4    not used
+;       P1.5    not used
+;       P1.6    LED2    (Active HIGH)GREEN
+;       P1.7    not used
+;
+;       P2.0    not used
+;       P2.1    not used
+;       P2.2    not used
+;       P2.3    not used
+;       P2.4    not used
+;       P2.5    not used
+;       P2.6    not used
+;       P2.7    not used
+;
+;-------------------------------------------------------------------------------
+#include  "msp430g2553.h"   ; these are standard name definitions
+;-------------------------------------------------------------------------------
+;Definition of constants
+redled          EQU     %00000001           ; Port pin position P1.0
+greenled        EQU     %01000000           ; Port pin position P1.6
+pushbutton      EQU     %00001000           ; Port pin position P1.3
+            ORG     0xC000                  ; Program Space start address
+;-------------------------------------------------------------------------------
+; necessary initialization
+RESET       mov.w   #0x0400,SP              ; Initialize stackpointer to bottom
+                                     
+StopWDT     mov.w   #WDTPW+WDTHOLD,&WDTCTL  ; Stop WDT (Watchdog Timer)
+; set up PORT 1 to have OUTPUT mode for RED LED pin position
+SetupP1     mov.b   #redled+greenled,&P1DIR  ; P1.0, and P1.6 set as 
+; These are for the two LED's ; The PushButton is wired to P1.3 (active LOW), so we need to turn 
+                    mov.b #pushbutton,&P1REN  ; turn on internal resistor
+                    mov.b #pushbutton,&P1OUT  ; set the resistor to pullup mode
+                    
+                    ; now start the continuous forever loop
+Mainloop:
+                    bic.b #redled,&P1OUT      ; explicitly turn RED LED OFF
+                    bic.b #greenled,&P1OUT    ; explicitly turn GREEN LED OFF
+                    mov.w #2,R14              
+                    mov.w #6,R15               
+
+; checks the state and turns on the redlight
+
+ButtonPressed: 
+                    bit.b #pushbutton,&P1IN   ; check the state of P1.3 
+                    jeq redLight                
+                    jmp end1                    
+                    
+; blinks the red led twice then turns it off and turns on the green light
+          
+FirstLoop:          sub.w #1,R14
+                    jne redLight
+                    jmp greenLight
+              
+; blinks the green led six times then turns it off and ends the program              
+
+SecondLoop:    
+                    sub.w #1,R15
+                    jne greenLight
+                    jmp end1
+          
+; turns on the red led and creates a delay
+
+redLight:           bis.b #redled,&P1OUT
+                    mov.w #0xFFFF,R10
+                    
+; creates a short delay by looping it 15 times
+
+DelayRed:           sub.w #1, R10
+                    jnz DelayRed
+                    
+; turns the red led off and creates a delay 
+
+ClearLoop1:         bic.b #redled,&P1OUT
+                    mov.w #0xFFFF,R10
+
+; creates a delay and turns the red led on again
+
+Delay1:             sub.w #1, R10
+                    jnz Delay1
+                    jmp FirstLoop
+                    
+; turns on the green led and creates a delay
+
+greenLight:         bis.b #greenled,&P1OUT
+                    mov.w #0xFFFF,R10
+               
+; creates a delay                
+                
+DelayGreen:         sub.w #1, R10
+                    jnz DelayGreen
+             
+; turns off the green led and creates a delay              
+                
+ClearLoop2:         bic.b #greenled,&P1OUT
+                    mov.w #0xFFFF,R10
+
+; creates a delay and turns the green led on again
+
+Delay2:             sub.w #1, R10
+                    jnz Delay2
+                    jmp SecondLoop
+                                
+end1:               jmp Mainloop            ; returns to the mainloop
+;-------------------------------------------------------------------------------
+;           Interrupt Vectors
+;-------------------------------------------------------------------------------
+            ORG     0xFFFE                  ; MSP430 RESET Vector table entry
+            DW      RESET                   ; address of instruction to load
+                                                         ; when reset occurs       
+             END                                  ; end of program

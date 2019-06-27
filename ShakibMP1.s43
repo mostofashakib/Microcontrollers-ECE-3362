@@ -1,0 +1,426 @@
+;-------------------------------------------------------------------------------
+;   Code of Project 1 for ECE 3362 Micrcontrollers class
+;   Provides Project 1 of how to use the custom 1-digit 7-segment LED 
+;   display expansion board developed for this class to extend capabilities of
+;   the TI LaunchPad development board
+;   
+;   This code provides demonstrates writing to the
+;   1-digit display- mainly. The program is blank until the pushbutton is pressed, in doing so the program quickly cycles through each segment 
+;   one at a time, then run a quick test of the 4 pushbuttons or a combination of pushbuttons, by turning on 
+;   the hexadecimal symbol from 1 to F to indicate which one (only one) PBs are pressed.  This
+;   block of code only demonstrates detection a combination of pushbuttons pressed at a time.
+;    
+;      
+;
+;   Target: TI LaunchPad development board with MSP430G2553 device with the
+;    custom  1 digit expansion Display Board installed
+;
+;       Date:           Sept 27, 2018
+;       Last Revision:  1.1  Sept 29, 2013
+;                        Minor restructure and code cleanup
+;                        1.2 Feb 8, 2016 - changed pushbutton comparison
+;                        statements to use binary notation, and added comments
+;                        in that section of code to better clarify pb tests
+;                        1.3  Feb 6, 2017 - changed hexadecimal formatting from
+;                        0000h style to 0x0000 style.   Minor cleanup other 
+;                        places to improve readability, changed to IAR IDE v 6.5
+;                        1.4  Sept 20, 2018 - corrected/clarified two comments
+;       Written by:     Mostofa Adib Shakib, ECE dept, Texas Tech University
+;       Adapted from:   Dr. Michael Helm, ECE dept, Texas Tech University
+;       Assembler/IDE:  IAR Embedded Workbench 6.5
+;
+;       HW I/O assignments:
+
+;
+;       P1.0    (output) LED1 LaunchPad bd (active high)
+;       P1.1    (input)  pushbutton (top) (active low) expansion bd 
+;       P1.2    (input)  pushbutton (second from top) (active low) expansion bd 
+;       P1.3    (input)  pushbutton on LaunchPad bd (active low)
+;       P1.4    (input) pushbutton (third from top) (active low) expansion bd
+;       P1.5    (input) pushbutton (bottom) (active low) expansion bd 
+;       P1.6    (output) LED2 LaunchPad bd (active high)  
+;       P1.7    (not used)  
+;
+;       P2.0    (output) Segment A (active high) drives display board
+;       P2.1    (output) Segment B (active high) drives display board
+;       P2.2    (output) Segment C (active high) drives display board
+;       P2.3    (output) Segment D (active high) drives display board
+;       P2.4    (output) Segment E (active high) drives display board
+;       P2.5    (output) Segment F (active high) drives display board
+;       P2.6    (output) Segment G (active high) drives display board
+;       P2.7    (output) Segment DP (active high) drives display board
+;
+;
+;
+;*******************************************************************************
+#include  "msp430g2553.h"
+;-------------------------------------------------------------------------------
+; Definition of Constants
+;-------------------------------------------------------------------------------
+
+LONG_DELAY      EQU     65535  ; max 16 bit value (FFFFh)
+;LONG_DELAY      EQU     600  ; max 16 bit value (FFFFh)
+SHORT_DELAY     EQU     5000  ; 
+
+SEG_A         EQU     %01111001 ; Port pin position P2.0  ;E
+SEG_B         EQU     %00111001 ; Port pin position P2.1  ;C
+SEG_C         EQU     %01000000 ; Port pin position P2.2  ;-
+SEG_D         EQU     %01001111 ; Port pin position P2.3  ;3
+SEG_E         EQU     %01111101 ; Port pin position P2.4  ;6
+SEG_F         EQU     %01011011 ; Port pin position P2.5  ;2
+SEG_G         EQU     %00111111 ; Port pin position P2.6  ;0
+SEG_DP        EQU     %10000000 ; Port pin position P2.7  ;.
+
+
+PB_0         EQU     %00000010 ; Port pin position P1.1
+PB_1         EQU     %00000100 ; Port pin position P1.2   
+PB_2         EQU     %00010000 ; Port pin position P1.4   
+PB_3         EQU     %00100000 ; Port pin position P1.5
+pushon       EQU     %00001000 ; Port pin position P1.3 (on LaunchPad bd)
+
+
+SEG_PORT         EQU     P2OUT
+PB_PORT          EQU     P1IN
+
+ONE             EQU     %00000110
+TWO             EQU     %01011011
+THREE           EQU     %01001111
+FOUR            EQU     %01100110
+FIVE            EQU     %01101101
+SIX             EQU     %01111101
+SEVEN           EQU     %00000111
+EIGHT           EQU     %01111111
+NINE            EQU     %01100111
+ZERO            EQU     %00111111
+LETTER_A        EQU     %01110111
+LETTER_B        EQU     %01111100
+LETTER_C        EQU     %00111001
+LETTER_D        EQU     %01011110
+LETTER_E        EQU     %01111001
+LETTER_F        EQU     %01110001
+DECIMAL         EQU     %01000000
+
+;-------------------------------------------------------------------------------
+; Definition of Variables
+;-------------------------------------------------------------------------------
+
+            ORG   0x0200     ; beginning of RAM space (necessary statement)
+
+; no variables used in this simple example
+
+;-------------------------------------------------------------------------------
+            ORG     0xC000                  ; Program Reset (prog memory start)
+                                            ; this is Program memory start 
+                                            ; address for MSP430G2553 (16K)
+;-------------------------------------------------------------------------------
+RESET       mov.w   #0x0400,SP        ; Initialize stackpointer(to end of RAM +1)
+                                     ; RAM is 512 bytes, last position is 3FFh
+                                     
+StopWDT     mov.w   #WDTPW+WDTHOLD,&WDTCTL  ; Stop WDT
+
+SetupP2               
+            mov.b   #0xFF, &P2DIR ; all as outputs to drive 7-seg LED 
+                                                            
+            bic.b    #0xC0, &P2SEL   ; Clears the P2SEL bits so that 
+                                     ; P2.6 and P2.7 function as GPIO pins
+                                       
+          
+Mainloop:                                        
+               mov.b    #0xBE, &P1REN      ;turn on the internal resistor for PB's
+                                           ; and all other "input" mode pins
+               mov.b    #0xBE, &P1OUT      ; set the resistors to Pullup mode 
+           
+               clr.b  &SEG_PORT            ; turn off all the segments 
+
+Pushon         bit.b    #pushon,&P1IN      ;Test if initialization push button is pressed
+               jz  DisplayTop
+               jmp Mainloop
+
+  ; the DisplayTop function displays "ECE - 3362  6 . 0" 
+            
+DisplayTop   
+
+           mov.b #SEG_A, &SEG_PORT  ; crude approach
+
+           call #Delay_Long
+           call #Delay_Long
+           call #Delay_Long
+           call #Delay_Long           
+           
+           mov.b #SEG_B, &SEG_PORT
+           call #Delay_Long
+           call #Delay_Long
+           call #Delay_Long
+           call #Delay_Long
+           call #Delay_Long
+           
+           mov.b #SEG_A, &SEG_PORT
+
+           call #Delay_Long
+           call #Delay_Long
+           call #Delay_Long
+           call #Delay_Long  
+           call #Delay_Long
+           
+           mov.b #SEG_C, &SEG_PORT
+           call #Delay_Long
+           call #Delay_Long
+           call #Delay_Long
+           call #Delay_Long
+           call #Delay_Long
+           
+           mov.b #SEG_D, &SEG_PORT
+           call #Delay_Long
+           call #Delay_Long
+           call #Delay_Long
+           call #Delay_Long
+           call #Delay_Long
+           
+           bic  #SEG_D, &SEG_PORT
+           call #Delay_Long
+           call #Delay_Long
+           
+           mov.b #SEG_D, &SEG_PORT
+           call #Delay_Long
+           call #Delay_Long
+           call #Delay_Long
+           call #Delay_Long 
+           call #Delay_Long
+           
+           mov.b #SEG_E, &SEG_PORT
+           call #Delay_Long
+           call #Delay_Long
+           call #Delay_Long
+           call #Delay_Long            
+           call #Delay_Long
+           
+           mov.b #SEG_F, &SEG_PORT
+           call #Delay_Long
+           call #Delay_Long
+           call #Delay_Long
+           call #Delay_Long
+           call #Delay_Long
+           
+           mov.b #SEG_E, &SEG_PORT
+           call #Delay_Long
+           call #Delay_Long
+           call #Delay_Long
+           call #Delay_Long
+           call #Delay_Long
+           
+           mov.b #SEG_DP, &SEG_PORT
+           call #Delay_Long
+           call #Delay_Long
+           call #Delay_Long
+           call #Delay_Long  
+           call #Delay_Long
+                     
+           mov.b #SEG_G, &SEG_PORT
+           call #Delay_Long
+           call #Delay_Long
+           call #Delay_Long
+           call #Delay_Long           
+           call #Delay_Long
+    
+ReadPort1   ; will test for single/combination of buttons pressed
+           
+           ;10BB1BB0 positions
+           ;      ^
+           ;10HH1HL0  - top button pressed
+           
+           cmp.b #%10111100, &PB_PORT   ; note buttons are in positions: 10BB1BB0
+           jeq   Case_Zero              ; P1.0 and P1.6 will read as ZEROs since
+                                        ; they are connected to LEDs and pulled LOW
+                                                                               
+           ;10BB1BB0 positions
+           ;     ^
+           ;10HH1LH0  - one down from top button pressed                                
+           cmp.b #%10111010, &PB_PORT   ; P1.3 will be HIGH (LaunchPad PB)
+           jeq   Case_One               ; and P1.7 will be HIGH (not connected)
+           
+           ;10BB1BB0 positions
+           ;   ^
+           ;10HL1HH0  - two down from top button pressed             
+           cmp.b #%10101110, &PB_PORT
+           jeq   Case_Two 
+           
+           ;10BB1BB0 positions
+           ;  ^
+           ;10LH1HH0  - bottom button pressed            
+           cmp.b #%10011110, &PB_PORT
+           jeq   Case_Three
+           
+           ; Third position         
+           cmp.b #%10111000, &PB_PORT
+           jeq   Case_Four
+           
+           ; Fifth position
+           cmp.b #%10101100, &PB_PORT
+           jeq   Case_Five
+           
+           ; Sixth position
+           cmp.b #%10101010, &PB_PORT
+           jeq   Case_Six
+           
+           ; Seventh position
+           cmp.b #%10101000, &PB_PORT
+           jeq   Case_Seven
+                      
+           ; Ninth position
+           cmp.b #%10011100, &PB_PORT
+           jeq   Case_Eight
+
+           ; Tenth position
+           cmp.b #%10011010, &PB_PORT
+           jeq   Case_Nine
+           
+           ; Eleventh position
+           cmp.b #%10011000, &PB_PORT
+           jeq   Case_Ten           
+
+           ; Twelveth position
+           cmp.b #%10001110, &PB_PORT
+           jeq   Case_Eleven           
+           
+           ; Thirteenth position
+           cmp.b #%10001100, &PB_PORT
+           jeq   Case_Twelve          
+           
+           ; Fourteenth position
+           cmp.b #%10001010, &PB_PORT
+           jeq   Case_Thirtheen
+           
+           ; Fifteenth position
+           cmp.b #%10001000, &PB_PORT
+           jeq   Case_Fourteen
+           
+           bit.b    #pushon,&P1IN   ; tests the state of the pin and jumps to mainloop
+           jz  Mainloop
+
+; the different display values             
+             
+Default    
+           mov.b #ZERO, &SEG_PORT
+           jmp Done
+Case_Zero          
+           
+           mov.b #ONE, &SEG_PORT
+           jmp Done
+           
+Case_One          
+           
+           mov.b #TWO, &SEG_PORT
+           jmp Done         
+          
+Case_Two          
+           
+           mov.b #FOUR, &SEG_PORT
+           jmp Done 
+           
+Case_Three          
+           
+           mov.b #EIGHT, &SEG_PORT
+           jmp Done
+           
+Case_Four
+
+           mov.b #THREE, &SEG_PORT
+           jmp Done
+
+Case_Five
+
+           mov.b #FIVE, &SEG_PORT
+           jmp Done
+
+Case_Six
+
+           mov.b #SIX, &SEG_PORT
+           jmp Done
+           
+Case_Seven 
+
+           mov.b #SEVEN, &SEG_PORT
+           jmp Done
+  
+Case_Eight
+
+           mov.b #NINE, &SEG_PORT
+           jmp Done
+           
+Case_Nine
+
+           mov.b #LETTER_A, &SEG_PORT
+           jmp Done
+           
+Case_Ten           
+           mov.b #LETTER_B, &SEG_PORT
+           jmp Done       
+           
+Case_Eleven
+
+           mov.b #LETTER_C, &SEG_PORT
+           jmp Done
+           
+Case_Twelve
+
+           mov.b #LETTER_D, &SEG_PORT
+           jmp Done
+           
+Case_Thirtheen
+
+           mov.b #LETTER_E, &SEG_PORT
+           jmp Done
+           
+Case_Fourteen
+
+           mov.b #LETTER_F, &SEG_PORT
+           jmp Done
+           
+Done:
+           jmp ReadPort1
+
+
+;-------------------------------------------------------------------------------
+;           End of main code
+;-------------------------------------------------------------------------------                                            
+                                           
+;-------------------------------------------------------------------------------
+;           Subroutines
+;------------------------------------------------------------------------------- 
+
+
+;-------------------------------------------------------------------------------
+; Delay_Long
+;  passed in - nothing
+;  returned - nothing
+;  accomplishes - long delay
+;  uses: R15
+;-------------------------------------------------------------------------------
+Delay_Long
+    push R15     ; save R15 since we use it here
+DelayTopL
+    mov #LONG_DELAY, R15     ;load loop counter (R15) with Long Delay constant
+Loop1Long
+    dec R15                     ; decrement loop counter
+    jnz Loop1Long               ; Zero yet?, no decrement again
+
+    pop R15     ; restore R15 before returning
+    ret         ; return
+;-------------------------------------------------------------------------------
+;  end of Delay_Long
+;-------------------------------------------------------------------------------
+
+;-------------------------------------------------------------------------------
+;           End of all Subroutines
+;-------------------------------------------------------------------------------
+
+;-------------------------------------------------------------------------------
+;           Interrupt Vectors
+;-------------------------------------------------------------------------------
+
+            ORG     0xFFFE                  ; MSP430 RESET Vector
+            DW      RESET                   ; establishes the label RESET as 
+                                            ; the starting point
+            END                             ; END of all code for this program
+;-------------------------------------------------------------------------------
+;-------------------------------------------------------------------------------
